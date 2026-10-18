@@ -1,0 +1,9 @@
+{
+  "name": "gate-practice-room",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GATE BT and XL mock exams from past papers, with GATE marking and topic analysis.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" }
+}
