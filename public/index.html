@@ -260,6 +260,9 @@ ul.ins li{margin:6px 0}
 const XL_OPT = ["Biochemistry","Botany","Microbiology","Zoology","Food Technology"];
 const BT_SECS = ["General Aptitude","Engineering Mathematics","General Biology","Genetics, Cellular and Molecular Biology","Fundamentals of Biological Engineering","Plant, Animal and Microbial Biotechnology","Recombinant DNA Technology and Other Tools"];
 const XL_SECS = ["General Aptitude","Chemistry", ...XL_OPT];
+const GS_SECS = ["General","Physics","Chemistry","Biology"];
+const EXNAME = {BT: "GATE BT", XL: "GATE XL", GS: "JGEEBILS"};
+const exName = e => EXNAME[e] || e;
 const GA = "General Aptitude";
 const MIN_PER_MARK = 1.8;   // 180 min / 100 marks
 const STRONG = 75, WEAK = 50, MIN_N = 5;
@@ -275,7 +278,7 @@ const fmtTime = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 
 const fmtMin = s => s < 60 ? Math.round(s) + " s" : (s / 60).toFixed(1) + " min";
 const fmtDate = t => new Date(t).toLocaleDateString(undefined, {day: "numeric", month: "short"});
 const fmtDT = t => new Date(t).toLocaleString(undefined, {day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
-const negTxt = n => n > 0.5 ? "2/3" : n > 0 ? "1/3" : "0";
+const negTxt = n => n === 0.25 ? "¼" : n === 0.5 ? "½" : n > 0.5 ? "2/3" : n > 0 ? "1/3" : "0";
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
@@ -290,7 +293,7 @@ const short = s => ({"Genetics, Cellular and Molecular Biology": "Genetics, Cell
 /* ---------- state ---------- */
 const st = {
   bank: [], byId: new Map(),
-  exam: LS.get("gate.exam", "BT") === "XL" ? "XL" : "BT",
+  exam: ["BT", "XL", "GS"].includes(LS.get("gate.exam", "BT")) ? LS.get("gate.exam", "BT") : "BT",
   xl: LS.get("gate.xl", ["Biochemistry", "Microbiology"]),
   attempts: LS.get("gate.attempts", []),
   run: null, view: "home", arg: null,
@@ -354,7 +357,7 @@ function history(exam) {
       const q = st.byId.get(it.id); if (!q || !counted(att, it)) continue;
       const g = grade(q, it.r);
       const prev = seen.get(it.id); seen.set(it.id, {n: (prev?.n || 0) + 1, last: g.st, mode: att.mode});
-      if (!(att.ex === exam || q.s === GA)) continue;
+      if (!(att.ex === exam || (inExam(exam, q) && att.ex !== "GS" && exam !== "GS"))) continue;
       for (const [map, key, t] of [[topics, q.s + "|" + q.t, q.t], [secs, q.s, ""]]) {
         const o = map.get(key) || {s: q.s, t, n: 0, max: 0, got: 0, right: 0, wrong: 0, skip: 0, ev: []};
         o.n++; o.max += q.m; o.got += g.mk; o[g.st]++; o.ev.push(Math.max(0, g.mk) / q.m); map.set(key, o);
@@ -399,7 +402,7 @@ async function cloudInit() {
     const localOnly = st.attempts.filter(a => !have.has(a.id));
     st.attempts = remote.concat(localOnly).sort((a, b) => a.created - b.created);
     if (prefs && (prefs.at || 0) > LS.get("gate.prefsAt", 0)) {
-      if (prefs.exam === "BT" || prefs.exam === "XL") st.exam = prefs.exam;
+      if (["BT", "XL", "GS"].includes(prefs.exam)) st.exam = prefs.exam;
       if (Array.isArray(prefs.xl) && prefs.xl.length === 2 && prefs.xl.every(s => XL_OPT.includes(s))) st.xl = prefs.xl;
     }
     saveLocal();
@@ -464,8 +467,10 @@ async function ensureImages(ids) {
 
 /* ---------- question pools ---------- */
 function examPool(exam, o = {}) {
-  return st.bank.filter(q => (q.ex === exam || q.s === GA) && q.a.k !== "mta" && !q.f.includes("key_disputed") && (o.outSyl || q.syl !== "out"));
+  return st.bank.filter(q => inExam(exam, q) && q.a.k !== "mta" && !q.f.includes("key_disputed") && (o.outSyl || q.syl !== "out"));
 }
+/* GATE General Aptitude is shared by BT and XL; JGEEBILS stands alone */
+function inExam(exam, q) { return q.ex === exam || (q.s === GA && exam !== "GS" && q.ex !== "GS"); }
 const dupKey = q => (q.q || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 70) || q.id;
 function pick(cands, n, o = {}) {
   const seen = o.seen || new Map(), used = o.used || new Set(), keys = o.keys || new Set();
@@ -489,14 +494,14 @@ function apportion(weights, n) {
   return raw;
 }
 const tabOf = (exam, q) => exam === "BT" ? (q.s === GA ? GA : "Biotechnology") : q.s;
-const orderSecs = exam => exam === "BT" ? BT_SECS : XL_SECS;
+const orderSecs = exam => exam === "BT" ? BT_SECS : exam === "GS" ? GS_SECS : XL_SECS;
 
 function buildFull(exam, o) {
   const pool = examPool(exam, o), H = history(exam), base = {seen: H.seen, preferNew: o.preferNew, used: new Set(), keys: new Set()};
   const qs = [];
   const take = (cands, n) => { const got = pick(cands, n, base); qs.push(...got); return got.length; };
   const gaPool = pool.filter(q => q.s === GA);
-  take(gaPool.filter(q => q.m === 1), 5); take(gaPool.filter(q => q.m === 2), 5);
+  if (exam !== "GS") { take(gaPool.filter(q => q.m === 1), 5); take(gaPool.filter(q => q.m === 2), 5); }
   if (exam === "BT") {
     const subj = pool.filter(q => q.s !== GA);
     for (const [m, need] of [[1, 25], [2, 30]]) {
@@ -505,6 +510,8 @@ function buildFull(exam, o) {
       for (const x of apportion(secs, need)) short_ += x.c - take(subj.filter(q => q.s === x.s && q.m === m), x.c);
       if (short_ > 0) take(subj.filter(q => q.m === m), short_);
     }
+  } else if (exam === "GS") {
+    for (const s of GS_SECS) { const sp = pool.filter(q => q.s === s); take(sp.filter(q => q.m === 1), 10); take(sp.filter(q => q.m === 2), 5); }
   } else {
     for (const s of ["Chemistry", ...XL_OPT]) {
       const sp = pool.filter(q => q.s === s), [n1, n2] = s === "Chemistry" ? [5, 10] : [10, 10];
@@ -517,9 +524,9 @@ function buildFull(exam, o) {
 function buildPaper(exam, year, o) {
   const pool = st.bank.filter(q => q.ex === exam && q.y === year && q.a.k !== "mta" && !q.f.includes("key_disputed") && (o.outSyl || q.syl !== "out"));
   const so = orderSecs(exam);
-  return pool.sort((a, b) => (a.s === GA ? 0 : 1) - (b.s === GA ? 0 : 1) || (exam === "XL" ? so.indexOf(a.s) - so.indexOf(b.s) : 0) || a.n - b.n);
+  return pool.sort((a, b) => (a.s === GA ? 0 : 1) - (b.s === GA ? 0 : 1) || (exam !== "BT" ? so.indexOf(a.s) - so.indexOf(b.s) : 0) || a.n - b.n);
 }
-const mySecs = exam => exam === "BT" ? null : [GA, "Chemistry", ...st.xl];
+const mySecs = exam => exam === "XL" ? [GA, "Chemistry", ...st.xl] : null;
 function inMine(exam, q) { const m = mySecs(exam); return !m || m.includes(q.s); }
 
 /* weak topics: lowest marks % with enough questions seen */
@@ -532,7 +539,7 @@ function weakTopics(exam) {
 }
 function mistakes(exam) {
   const H = history(exam);
-  return st.bank.filter(q => { const s = H.seen.get(q.id); return s && (s.last === "wrong" || (s.last === "skip" && s.mode === "exam")) && (q.ex === exam || q.s === GA) && inMine(exam, q) && q.a.k !== "mta"; });
+  return st.bank.filter(q => { const s = H.seen.get(q.id); return s && (s.last === "wrong" || (s.last === "skip" && s.mode === "exam")) && inExam(exam, q) && inMine(exam, q) && q.a.k !== "mta"; });
 }
 
 /* ---------- builder ---------- */
@@ -547,10 +554,10 @@ function startFromBuilder() {
   const o = {outSyl: b.outSyl, preferNew: b.preferNew};
   let qs = [], title = "", limit = 0, xlSwitch = false;
   if (b.kind === "full") {
-    qs = buildFull(ex, o); title = `Full mock · GATE ${ex}`; limit = 180 * 60; xlSwitch = ex === "XL";
+    qs = buildFull(ex, o); title = `Full mock · ${exName(ex)}`; limit = 180 * 60; xlSwitch = ex === "XL";
   } else if (b.kind === "paper") {
     if (!b.year) return toast("Pick a year first.");
-    qs = buildPaper(ex, b.year, o); title = `GATE ${ex} ${b.year} paper`; limit = 180 * 60; xlSwitch = ex === "XL";
+    qs = buildPaper(ex, b.year, o); title = `${exName(ex)} ${b.year} paper`; limit = 180 * 60; xlSwitch = ex === "XL";
   } else {
     const H = history(ex);
     let cands = examPool(ex, o).filter(q => b.types.has(q.ty) && b.diff.has(q.d));
@@ -569,7 +576,7 @@ function startFromBuilder() {
     const want = Math.max(1, b.n | 0), po = {seen: H.seen, preferNew: b.preferNew, used: new Set(), keys: new Set()};
     if (b.kind === "quick") {   // balance by real paper weight, not by pool size
       const secs = [...new Set(cands.map(q => q.s))];
-      const w = secs.map(s => ({s, w: s === GA ? 15 : ex === "XL" ? (s === "Chemistry" ? 25 : 30) : 85 * cands.filter(q => q.s === s).length / Math.max(1, cands.filter(q => q.s !== GA).length)}));
+      const w = secs.map(s => ({s, w: s === GA ? 15 : ex === "GS" ? 20 : ex === "XL" ? (s === "Chemistry" ? 25 : 30) : 85 * cands.filter(q => q.s === s).length / Math.max(1, cands.filter(q => q.s !== GA).length)}));
       for (const x of apportion(w, want)) qs.push(...pick(cands.filter(q => q.s === x.s), x.c, po));
       if (qs.length < want) qs.push(...pick(cands, want - qs.length, po));
     } else qs = pick(cands, want, po);
@@ -665,7 +672,7 @@ function drawTop() {
   $("#topbar").innerHTML = `
     <div class="brand"><span class="dot">G</span>GATE Practice Room</div>
     ${inExam ? "" : `<div class="seg" role="group" aria-label="Paper">
-      ${["BT", "XL"].map(x => `<button data-act="exam" data-v="${x}" class="${st.exam === x ? "on" : ""}" aria-pressed="${st.exam === x}">${x}</button>`).join("")}</div>
+      ${["BT", "XL", "GS"].map(x => `<button data-act="exam" data-v="${x}" class="${st.exam === x ? "on" : ""}" aria-pressed="${st.exam === x}">${x === "GS" ? "JGEEBILS" : x}</button>`).join("")}</div>
     <nav class="nav">${[["home", "Home"], ["build", "New test"], ["progress", "Progress"]].map(([v, l]) => `<button data-act="go" data-v="${v}" class="${st.view === v || (v === "progress" && (st.view === "result" || st.view === "review")) ? "on" : ""}">${l}</button>`).join("")}</nav>`}`;
 }
 
@@ -704,15 +711,15 @@ function viewHome() {
   return `
   <div class="sec" style="margin-top:18px">
     <div class="row"><div><h1>What shall we practise today?</h1>
-      <div class="muted" style="margin-top:4px">GATE ${ex} · ${pool.length} past questions from ${years[0]}–${years[years.length - 1]}${ex === "XL" ? " (more years coming)" : ""}</div></div>
+      <div class="muted" style="margin-top:4px">${exName(ex)} · ${pool.length} past questions from ${years[0]}–${years[years.length - 1]}${ex === "XL" ? " (more years coming)" : ""}</div></div>
       <span class="sp"></span>${storageNote()}</div>
     ${ex === "XL" ? xlPicker() : ""}
     ${draft && draft.items ? `<div class="banner" style="margin-top:14px"><div class="row"><div><b>You have a test in progress</b><div class="small muted">${esc(draft.title)} · ${draft.items.filter(i => !isBlank(i.r)).length} answered${draft.limit ? " · " + fmtTime(draft.left) + " left" : ""}</div></div><span class="sp"></span>
       <button class="btn ghost danger sm" data-act="dropdraft">Discard</button><button class="btn pri" data-act="resume">Resume</button></div></div>` : ""}
   </div>
   <div class="grid g3 sec">
-    ${modeCard("full", "Full mock exam", ex === "BT" ? "65 questions · 100 marks · 3 hours. Mixed from all years, real GATE pattern." : "GA + Chemistry + your 2 sections · 100 marks · 3 hours. Real GATE pattern.")}
-    ${modeCard("paper", "A real past paper", `Sit an actual GATE ${ex} paper exactly as it was set (${years.join(", ")}).`)}
+    ${modeCard("full", "Full mock exam", ex === "BT" ? "65 questions · 100 marks · 3 hours. Mixed from all years, real GATE pattern." : ex === "GS" ? "60 questions · 80 marks · 3 hours. 15 each from General, Physics, Chemistry and Biology." : "GA + Chemistry + your 2 sections · 100 marks · 3 hours. Real GATE pattern.")}
+    ${modeCard("paper", "A real past paper", `Sit an actual ${exName(ex)} paper exactly as it was set (${years.join(", ")}).`)}
     ${modeCard("topics", "Pick topics", "Choose sections or topics, how many questions, and timed or instant-feedback practice.")}
     ${modeCard("weak", "Weak topics", weak.length ? `Focus on: ${weak.slice(0, 3).map(t => esc(t.t)).join(", ")}${weak.length > 3 ? "…" : ""}` : "Unlocks after a test or two — I'll find the topics that need work.", !weak.length)}
     ${modeCard("mistakes", "Retry my mistakes", mist ? `${mist} question${mist > 1 ? "s" : ""} you got wrong or left blank last time.` : "Questions you get wrong will collect here.", !mist)}
@@ -760,9 +767,10 @@ function viewBuild() {
   const common = (extra) => `<div class="field"><span class="lab">Options</span>${toggles([
       ["preferNew", "Prefer questions I haven't seen", "Fresh questions come first; repeats only fill gaps."],
       ...(extra || []),
-      ["outSyl", "Include questions outside the 2027 syllabus", `${st.bank.filter(q => q.syl === "out" && (q.ex === ex)).length} old-syllabus questions are left out by default.`]])}</div>`;
+      ...(st.bank.some(q => q.syl === "out" && q.ex === ex) ? [["outSyl", "Include questions outside the 2027 syllabus", `${st.bank.filter(q => q.syl === "out" && (q.ex === ex)).length} old-syllabus questions are left out by default.`]] : [])])}</div>`;
   if (b.kind === "full") {
-    body = `<p class="muted" style="margin-top:0">${ex === "BT" ? "General Aptitude: 10 questions (15 marks). Biotechnology: 55 questions (85 marks), spread across topics the way real papers are." : `General Aptitude 10 questions (15 marks) + Chemistry 15 (25 marks) + ${st.xl.join(" and ")} 20 each (30 marks each). You can switch the two optional sections during the test.`}
+    body = ex === "GS" ? `<p class="muted" style="margin-top:0">General, Physics, Chemistry and Biology: 15 questions each, the first 10 worth 1 mark and the last 5 worth 2 (80 marks), mixed from all years.
+      Marking: a wrong answer costs ¼ of the question's marks (−0.25 or −0.5). TIFR confirms negative marking but doesn't publish the amount; these are the commonly reported values.</p>${common()}` : `<p class="muted" style="margin-top:0">${ex === "BT" ? "General Aptitude: 10 questions (15 marks). Biotechnology: 55 questions (85 marks), spread across topics the way real papers are." : `General Aptitude 10 questions (15 marks) + Chemistry 15 (25 marks) + ${st.xl.join(" and ")} 20 each (30 marks each). You can switch the two optional sections during the test.`}
       Marking: wrong MCQ costs 1/3 (1-mark) or 2/3 (2-mark). MSQ and NAT have no negative marks.</p>${ex === "XL" ? xlPicker() : ""}${common()}`;
   } else if (b.kind === "paper") {
     const years = [...new Set(st.bank.filter(q => q.ex === ex).map(q => q.y))].sort((a, c) => c - a);
@@ -795,10 +803,10 @@ function viewBuild() {
     const n = mistakes(ex).length;
     body = n ? `<p class="muted" style="margin-top:0">${n} question${n > 1 ? "s" : ""} you answered wrongly or left blank last time. Get one right and it leaves this list.</p>${modePick()}${count(n)}${time()}${filters()}` : `<div class="card empty">Nothing here yet. Questions you get wrong will collect here for another go.</div>`;
   } else if (b.kind === "quick") {
-    body = `<p class="muted" style="margin-top:0">Ten questions from across ${ex === "XL" ? "GA, Chemistry and your two sections" : "the whole BT paper"}, with the answer and explanation right after each one.</p>${modePick()}${count(100)}${filters()}${common()}`;
+    body = `<p class="muted" style="margin-top:0">Ten questions from across ${ex === "XL" ? "GA, Chemistry and your two sections" : ex === "GS" ? "all four JGEEBILS sections" : "the whole BT paper"}, with the answer and explanation right after each one.</p>${modePick()}${count(100)}${filters()}${common()}`;
   }
   const canStart = !(b.kind === "weak" && !weakTopics(ex).weak.length) && !(b.kind === "mistakes" && !mistakes(ex).length);
-  return `<div class="sec" style="margin-top:18px"><h1>New test</h1><div class="muted" style="margin-top:4px">GATE ${ex}${ex === "XL" ? " · " + st.xl.join(" + ") : ""}</div></div>
+  return `<div class="sec" style="margin-top:18px"><h1>New test</h1><div class="muted" style="margin-top:4px">${exName(ex)}${ex === "XL" ? " · " + st.xl.join(" + ") : ""}</div></div>
     <div class="tabs" style="margin-top:14px">${kinds.map(([k, l]) => `<button data-act="bkind" data-v="${k}" class="${b.kind === k ? "on" : ""}">${l}</button>`).join("")}</div>
     <div class="card" style="margin-top:12px">${body}
       <div class="row" style="margin-top:18px"><span class="sp"></span><button class="btn pri" data-act="start" ${canStart ? "" : "disabled"}>Start ${b.kind === "paper" && b.year ? b.year + " paper" : b.mode === "practice" && b.kind !== "full" && b.kind !== "paper" ? "practice" : "test"} →</button></div></div>`;
@@ -832,8 +840,8 @@ function drawQ() {
   const typeHint = q.ty === "MCQ" ? `MCQ · one correct answer · wrong answer costs ${negTxt(q.ng)} mark` : q.ty === "MSQ" ? "MSQ · one or more correct answers · no negative marks" : "NAT · type a number · no negative marks";
   el.innerHTML = `<div class="qhead"><span class="qn">Question ${pos}<span class="muted" style="font-weight:500"> of ${n}</span></span>
       <span class="tag">${q.m} mark${q.m > 1 ? "s" : ""}</span><span class="tag">${q.ty}</span>${it.mk ? `<span class="tag" style="background:var(--mark-soft);color:var(--mark)">Marked for review</span>` : ""}
-      <span class="sp"></span><span class="small muted">GATE ${q.ex} ${q.y} · Q.${q.n}</span></div>
-    <div class="paper" data-act="zoom" title="Tap to zoom (tap again for more, third tap resets)">${src ? `<img src="${src}" alt="Question ${pos}, as printed in the GATE ${q.ex} ${q.y} paper">` : `<div class="ld"><span class="spin"></span> Loading…</div>`}</div>
+      <span class="sp"></span><span class="small muted">${exName(q.ex)} ${q.y} · Q.${q.n}</span></div>
+    <div class="paper" data-act="zoom" title="Tap to zoom (tap again for more, third tap resets)">${src ? `<img src="${src}" alt="Question ${pos}, as printed in the ${exName(q.ex)} ${q.y} paper">` : `<div class="ld"><span class="spin"></span> Loading…</div>`}</div>
     <div class="hint">${typeHint}<span class="om"> · tap the question to zoom</span></div>
     <div id="opts"></div><div id="fb"></div>
     <div class="qnav">
@@ -907,7 +915,7 @@ function viewResult(id) {
   const tright = avg(S.rows.filter(x => x.st === "right").map(x => x.it.t || 0)), twrong = avg(S.rows.filter(x => x.st === "wrong").map(x => x.it.t || 0));
   const slow = S.rows.slice().sort((a, b) => (b.it.t || 0) - (a.it.t || 0)).slice(0, 3).filter(x => x.it.t > 0);
   const tStat = (s) => s.n < 2 ? `<span class="tag">Only ${s.n} Q</span>` : statusTag(pct(s.got, s.max) >= STRONG ? "strong" : pct(s.got, s.max) < WEAK ? "weak" : "ok", s.n);
-  return `<div class="sec" style="margin-top:18px"><div class="row"><div><h1>${esc(att.title)}</h1><div class="muted" style="margin-top:4px">${fmtDT(att.created)} · ${att.mode === "practice" ? "Practice" : "Timed test"} · GATE ${att.ex}${att.secs ? " · " + att.secs.filter(s => XL_OPT.includes(s)).join(" + ") : ""}</div></div>
+  return `<div class="sec" style="margin-top:18px"><div class="row"><div><h1>${esc(att.title)}</h1><div class="muted" style="margin-top:4px">${fmtDT(att.created)} · ${att.mode === "practice" ? "Practice" : "Timed test"} · ${exName(att.ex)}${att.secs ? " · " + att.secs.filter(s => XL_OPT.includes(s)).join(" + ") : ""}</div></div>
     <span class="sp"></span><button class="btn" data-act="go" data-v="review" data-a="${att.id}">Review answers</button></div></div>
   <div class="card sec">
     <div class="hero"><div><div class="muted small">${att.mode === "practice" ? "Marks on the questions you tried" : "Your score"}</div><div class="big num">${fm(S.score)}<span class="of"> / ${S.max}</span></div></div>
@@ -930,7 +938,7 @@ function viewResult(id) {
     </tbody></table></div></div>
   <div class="sec card"><h2>Time</h2>
     <div class="tiles" style="margin-top:10px">${tile(S.rows.length ? fmtMin((att.used || S.time) / S.rows.length) : "–", "average per question")}${tile(S.right ? fmtMin(tright) : "–", "average on right answers")}${tile(S.wrong ? fmtMin(twrong) : "–", "average on wrong answers")}</div>
-    ${slow.length ? `<p class="small muted" style="margin:12px 0 4px">Questions that took longest:</p>${slow.map(x => `<div class="row small" style="padding:4px 0"><span class="num" style="width:60px"><b>${fmtMin(x.it.t)}</b></span><span style="flex:1">${esc(x.q.t)} · ${x.q.m} mark${x.q.m > 1 ? "s" : ""} · GATE ${x.q.ex} ${x.q.y} Q.${x.q.n}</span><span class="tag ${x.st === "right" ? "good" : x.st === "wrong" ? "bad" : ""}">${x.st === "right" ? "✓ right" : x.st === "wrong" ? "✗ wrong" : "blank"}</span></div>`).join("")}` : ""}</div>
+    ${slow.length ? `<p class="small muted" style="margin:12px 0 4px">Questions that took longest:</p>${slow.map(x => `<div class="row small" style="padding:4px 0"><span class="num" style="width:60px"><b>${fmtMin(x.it.t)}</b></span><span style="flex:1">${esc(x.q.t)} · ${x.q.m} mark${x.q.m > 1 ? "s" : ""} · ${exName(x.q.ex)} ${x.q.y} Q.${x.q.n}</span><span class="tag ${x.st === "right" ? "good" : x.st === "wrong" ? "bad" : ""}">${x.st === "right" ? "✓ right" : x.st === "wrong" ? "✗ wrong" : "blank"}</span></div>`).join("")}` : ""}</div>
   <div class="sec row"><button class="btn pri" data-act="go" data-v="review" data-a="${att.id}">Review answers & explanations</button>
     ${topics.some(t => t.n >= 1 && pct(t.got, t.max) < WEAK) ? `<button class="btn" data-act="practisefrom" data-a="${att.id}">Practise this test's weak topics</button>` : ""}
     <span class="sp"></span><button class="btn ghost danger sm" data-act="delatt" data-a="${att.id}">Delete this test</button></div>`;
@@ -940,7 +948,7 @@ function insights(att, S) {
   const out = [], p = pct(S.score, S.max), tried = S.right + S.wrong;
   out.push(`You scored <b>${fm(S.score)} out of ${S.max}</b> (${p}%). You tried ${tried} of ${S.rows.length} questions and got ${S.right} right.`);
   const mcqW = S.rows.filter(x => x.q.ty === "MCQ" && x.st === "wrong"), mcqT = S.rows.filter(x => x.q.ty === "MCQ" && x.st !== "skip");
-  if (S.neg > 0) out.push(`Wrong MCQs cost you <b>${fm(S.neg)} marks</b> (${mcqW.length} wrong of ${mcqT.length} MCQs tried). A guess only pays off if you can rule out at least one option first.`);
+  if (S.neg > 0) out.push(`Wrong MCQs cost you <b>${fm(S.neg)} marks</b> (${mcqW.length} wrong of ${mcqT.length} MCQs tried). ${att.ex === "GS" ? "With JGEEBILS marking (−¼ per wrong answer) even a blind guess has a slightly positive expected score; ruling out one option makes guessing clearly worth it." : "A guess only pays off if you can rule out at least one option first."}`);
   const blankNoNeg = S.rows.filter(x => x.st === "skip" && x.q.ty !== "MCQ");
   if (att.mode === "exam" && blankNoNeg.length) out.push(`You left <b>${blankNoNeg.length} MSQ/NAT question${blankNoNeg.length > 1 ? "s" : ""}</b> blank (${blankNoNeg.reduce((a, x) => a + x.q.m, 0)} marks). These have no negative marking, so always put down your best answer.`);
   const secs = [...S.by.values()].filter(s => s.n >= 3).map(s => ({...s, p: pct(s.got, s.max)})).sort((a, b) => b.p - a.p);
@@ -972,8 +980,8 @@ function viewReview(id) {
     <div class="tabs" style="margin-top:14px">${[["wrong", "Wrong"], ["skip", "Blank"], ["marked", "Marked"], ["right", "Right"], ["all", "All"]].map(([k, l]) => `<button data-act="rvf" data-v="${k}" data-a="${att.id}" class="${f === k ? "on" : ""}">${l} <span class="num" style="opacity:.75">${cnt[k]}</span></button>`).join("")}</div></div>
   ${rows.length ? rows.map(x => {
     const src = imgSrc(x.q.id);
-    return `<div class="card rv"><div class="meta"><b>Q${x.k}</b><span class="tag ${x.st === "right" ? "good" : x.st === "wrong" ? "bad" : ""}">${x.st === "right" ? "✓ Right +" + x.q.m : x.st === "wrong" ? "✗ Wrong " + fm(x.mk) : "Blank 0"}</span><span class="tag">${x.q.ty} · ${x.q.m} mark${x.q.m > 1 ? "s" : ""}</span>${x.it.mk ? `<span class="tag" style="background:var(--mark-soft);color:var(--mark)">Marked</span>` : ""}<span class="sp"></span><span class="small muted">${x.it.t ? fmtMin(x.it.t) + " · " : ""}GATE ${x.q.ex} ${x.q.y} Q.${x.q.n}</span></div>
-      <div class="paper" data-act="zoom"><img id="img-${x.q.id}" ${src ? `src="${src}"` : ""} alt="Question as printed in the GATE ${x.q.ex} ${x.q.y} paper" loading="lazy"></div>
+    return `<div class="card rv"><div class="meta"><b>Q${x.k}</b><span class="tag ${x.st === "right" ? "good" : x.st === "wrong" ? "bad" : ""}">${x.st === "right" ? "✓ Right +" + x.q.m : x.st === "wrong" ? "✗ Wrong " + fm(x.mk) : "Blank 0"}</span><span class="tag">${x.q.ty} · ${x.q.m} mark${x.q.m > 1 ? "s" : ""}</span>${x.it.mk ? `<span class="tag" style="background:var(--mark-soft);color:var(--mark)">Marked</span>` : ""}<span class="sp"></span><span class="small muted">${x.it.t ? fmtMin(x.it.t) + " · " : ""}${exName(x.q.ex)} ${x.q.y} Q.${x.q.n}</span></div>
+      <div class="paper" data-act="zoom"><img id="img-${x.q.id}" ${src ? `src="${src}"` : ""} alt="Question as printed in the ${exName(x.q.ex)} ${x.q.y} paper" loading="lazy"></div>
       <dl class="ans"><dt>Your answer</dt><dd style="color:${x.st === "right" ? "var(--good-ink)" : x.st === "wrong" ? "var(--bad-ink)" : "var(--ink-3)"}">${esc(respText(x.q, x.it.r))}</dd><dt>Correct answer</dt><dd>${esc(keyText(x.q))}</dd><dt>Topic</dt><dd style="font-weight:500">${esc(x.q.s)} → ${esc(x.q.t)}${x.q.st ? " → " + esc(x.q.st) : ""}</dd></dl>
       <div style="margin-top:10px">${esc(x.q.e)}</div>${x.q.f.includes("multiple_answers_accepted") ? `<div class="small muted" style="margin-top:6px">The official key accepted more than one option here.</div>` : ""}</div>`; }).join("") : `<div class="card empty" style="margin-top:12px">Nothing in this group.</div>`}`;
 }
@@ -990,7 +998,7 @@ function viewProgress() {
   const secs = orderSecs(ex).map(s => H.secs.get(s)).filter(Boolean);
   const topics = [...H.topics.values()].sort((a, b) => (a.status === "few") - (b.status === "few") || a.p - b.p);
   const strong = topics.filter(t => t.status === "strong"), weak = topics.filter(t => t.status === "weak");
-  if (!mine.length) return `<div class="sec" style="margin-top:18px"><h1>Progress · GATE ${ex}</h1></div><div class="card empty sec">No tests yet. After your first test, this page shows your score trend, strong and weak topics${ex === "XL" ? ", and which optional sections suit you best" : ""}.</div>`;
+  if (!mine.length) return `<div class="sec" style="margin-top:18px"><h1>Progress · ${exName(ex)}</h1></div><div class="card empty sec">No tests yet. After your first test, this page shows your score trend, strong and weak topics${ex === "XL" ? ", and which optional sections suit you best" : ""}.</div>`;
   let xlRec = "";
   if (ex === "XL") {
     const rows = XL_OPT.map(s => H.secs.get(s) || {s, n: 0, p: 0, max: 0, got: 0});
@@ -999,7 +1007,7 @@ function viewProgress() {
       ${rows.map(r => hbar(r.s + (st.xl.includes(r.s) ? " ✓" : ""), r.n ? r.p : 0, r.n ? `${r.n} questions tried` : "not tried yet")).join("")}
       <p class="small" style="margin:12px 0 0">${ranked.length >= 2 ? `So far your best two are <b>${esc(ranked[0].s)}</b> (${ranked[0].p}%) and <b>${esc(ranked[1].s)}</b> (${ranked[1].p}%).${ranked.slice(0, 2).every(r => st.xl.includes(r.s)) ? " That matches your current pick." : " That's different from your current pick — worth a few more topic tests before deciding."}` : "Try at least 8 questions in two or more optional sections (use Pick topics) and I'll compare them for you."}</p></div>`;
   }
-  return `<div class="sec" style="margin-top:18px"><div class="row"><div><h1>Progress · GATE ${ex}</h1><div class="muted" style="margin-top:4px">Across all your tests and practice</div></div><span class="sp"></span>${storageNote()}</div></div>
+  return `<div class="sec" style="margin-top:18px"><div class="row"><div><h1>Progress · ${exName(ex)}</h1><div class="muted" style="margin-top:4px">Across all your tests and practice</div></div><span class="sp"></span>${storageNote()}</div></div>
   <div class="tiles sec">${tile(mine.length, "tests and practice sets")}${tile(avgP == null ? "–" : avgP + "%", "average timed score")}${tile(best == null ? "–" : best + "%", "best timed score")}${tile(seenN + " / " + pool.length, "questions seen")}</div>
   <div class="sec card"><div class="hd"><h2>Score trend (timed tests)</h2><span class="small muted">% of marks in each timed test</span></div>
     ${timed.length >= 1 ? `<div class="chart" id="trend"></div><div class="legend"><span><i class="sw"></i>Full mock or past paper</span><span><i class="sw o"></i>Shorter timed test</span></div>` : `<div class="empty">Take a timed test to start the trend line.</div>`}</div>
